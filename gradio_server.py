@@ -5,6 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from langchain.agents import initialize_agent, Tool
 from langchain.chat_models import ChatOpenAI
 
+from dotenv import load_dotenv
+load_dotenv()
+
+
 # Dummy tool functions for testing
 def run_jenkins_job(input: str) -> str:
     return f"Triggered Jenkins job with input: {input}"
