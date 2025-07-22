@@ -7,9 +7,9 @@ from tools.mobsf_tool import run_mobsf_scan
 llm = ChatOpenAI(temperature=0)
 
 tools = [
-    Tool(name="Run Jenkins Job", func=run_jenkins_job, description="Trigger Jenkins security test"),
-    Tool(name="Run Nmap Scan", func=run_nmap_scan, description="Run Nmap on a given URL"),
-    Tool(name="Run MobSF Scan", func=run_mobsf_scan, description="Run MobSF scan on a mobile app"),
+    Tool(name="Run Jenkins Job", func=run_jenkins_job, description="Trigger Jenkins security test if the user inputs url"),
+    # Tool(name="Run Nmap Scan", func=run_nmap_scan, description="Run Nmap on a given URL"),
+    Tool(name="Run MobSF Scan", func=run_mobsf_scan, description="Run MobSF scan on a mobile app if the user inputs a mobile app"),
 ]
 
 agent = initialize_agent(tools, llm, agent="zero-shot-react-description", verbose=True)

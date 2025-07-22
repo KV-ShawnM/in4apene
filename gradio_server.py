@@ -4,27 +4,19 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.agents import initialize_agent, Tool
 from langchain.chat_models import ChatOpenAI
+from tools.jenkins_tool import run_jenkins_job
+from tools.mobsf_tool import run_mobsf_scan
 
 from dotenv import load_dotenv
 load_dotenv()
 
 
-# Dummy tool functions for testing
-def run_jenkins_job(input: str) -> str:
-    return f"Triggered Jenkins job with input: {input}"
-
-def run_nmap_scan(input: str) -> str:
-    return f"Performed Nmap scan on: {input}"
-
-def run_mobsf_scan(input: str) -> str:
-    return f"Performed MobSF scan on: {input}"
-
 # Initialize LangChain agent
-llm = ChatOpenAI(temperature=0)
+llm = ChatOpenAI(model="gpt-4o", temperature=0)
 tools = [
-    Tool(name="Run Jenkins Job", func=run_jenkins_job, description="Trigger Jenkins security test"),
-    Tool(name="Run Nmap Scan", func=run_nmap_scan, description="Run Nmap on a given URL"),
-    Tool(name="Run MobSF Scan", func=run_mobsf_scan, description="Run MobSF scan on a mobile app"),
+    Tool(name="Run Jenkins Job", func=run_jenkins_job, description="Trigger Jenkins security test if the user inputs url"),
+    # Tool(name="Run Nmap Scan", func=run_nmap_scan, description="Run Nmap on a given URL"),
+    Tool(name="Run MobSF Scan", func=run_mobsf_scan, description="Run MobSF scan on a mobile app if the user inputs a mobile app"),
 ]
 agent = initialize_agent(tools, llm, agent="zero-shot-react-description", verbose=True)
 
