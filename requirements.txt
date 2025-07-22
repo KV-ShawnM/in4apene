@@ -1,0 +1,7 @@
+langchain
+openai
+gradio
+fastapi
+uvicorn
+python-dotenv
+requests
