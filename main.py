@@ -244,11 +244,125 @@ async def handle_app_mention(event, say):
         logging.error(f"Error handling app mention: {e}", exc_info=True)
         await say(text=f"Sorry, a critical error occurred: {e}", thread_ts=thread_ts)
 
+@slack_app.event("message")
+async def handle_direct_message(event, say):
+    """
+    This function is triggered when the bot receives a direct message.
+    It allows users to communicate with the bot through the message tab.
+    """
+    # Only handle direct messages (not channel messages)
+    if event.get("channel_type") != "im":
+        return
+    
+    user_input = event["text"]
+    thread_ts = event.get("thread_ts", event["ts"])
+    state = conversation_state.get(thread_ts, {})
+    user_intent = user_input.lower()
+
+    try:
+        # --- Questionnaire Logic ---
+        if state.get("in_questionnaire"):
+            if "questions" not in state:
+                if "mobile" in user_intent or "web" in user_intent:
+                    project_type = "mobile" if "mobile" in user_intent else "web"
+                    state["project_type"] = project_type
+                    state["questions"] = MOBILE_QUESTIONS if project_type == "mobile" else WEB_QUESTIONS
+                    state["question_index"] = 1
+                    first_question = state["questions"][0]
+                    conversation_state[thread_ts] = state
+                    await say(text=first_question, thread_ts=thread_ts)
+                else:
+                    await say(text="Please specify if your project is 'mobile' or 'web' to continue.", thread_ts=thread_ts)
+                return
+
+            else:
+                question_list = state["questions"]
+                question_index = state["question_index"]
+                last_question = question_list[question_index - 1]
+                state["answers"][last_question] = user_input
+
+                tool_response = ""
+                if "What is the website URL?" in last_question or "contact a server via the internet" in last_question:
+                    logging.info(f"URL detected. Triggering Jenkins build for: {user_input}")
+                    tool_response = trigger_jenkins_build(endpoint=user_input)
+
+                if question_index < len(question_list):
+                    next_question = question_list[question_index]
+                    state["question_index"] += 1
+                    conversation_state[thread_ts] = state
+                    response_text = f"Okay, I'm starting a scan on that endpoint. {tool_response}\n\nIn the meantime, let's continue. {next_question}" if tool_response else next_question
+                    await say(text=response_text, thread_ts=thread_ts)
+                else:
+                    conn = sqlite3.connect(DB_FILE)
+                    cursor = conn.cursor()
+                    answers_json = json.dumps(state["answers"], indent=4)
+                    timestamp = datetime.now().isoformat()
+                    cursor.execute("INSERT INTO audits (project_type, answers, timestamp) VALUES (?, ?, ?)", (state["project_type"], answers_json, timestamp))
+                    conn.commit()
+                    conn.close()
+                    final_message = "Thank you! All answers have been recorded. How else can I help?"
+                    del conversation_state[thread_ts]
+                    await say(text=final_message, thread_ts=thread_ts)
+                return
+
+        # --- Start a new questionnaire or use a tool ---
+        is_audit_request = "audit" in user_intent or "questionnaire" in user_intent
+        is_tool_request = "jenkins" in user_intent or "mobsf" in user_intent
+
+        if is_audit_request and not is_tool_request:
+            state["in_questionnaire"] = True
+            state["answers"] = {}
+            conversation_state[thread_ts] = state
+            await say(text="I can help with that. What kind of project is it - mobile or web?", thread_ts=thread_ts)
+            return
+
+        # --- Default to LangChain Agent ---
+        if not OPENAI_API_KEY:
+            await say(text="OpenAI API key is not configured.", thread_ts=thread_ts)
+            return
+
+        # Retrieve history for the agent
+        chat_history = state.get("agent_history", [])
+        response = await agent_executor.ainvoke({"input": user_input, "chat_history": chat_history})
+        output = response["output"]
+
+        # Update and store agent history
+        chat_history.extend([HumanMessage(content=user_input), AIMessage(content=output)])
+        state["agent_history"] = chat_history
+        conversation_state[thread_ts] = state
+
+        await say(text=output, thread_ts=thread_ts)
+
+    except Exception as e:
+        logging.error(f"Error handling direct message: {e}", exc_info=True)
+        await say(text=f"Sorry, a critical error occurred: {e}", thread_ts=thread_ts)
+
 
 # --- 6. Flask Server Routes ---
+@flask_app.route("/", methods=["GET"])
+def root():
+    """Root endpoint with basic server information."""
+    return {
+        "message": "LangChain Security Bot for Slack",
+        "status": "running",
+        "endpoints": {
+            "health": "/health",
+            "slack_events": "/slack/events"
+        },
+        "version": "1.0.0"
+    }, 200
+
 @flask_app.route("/slack/events", methods=["POST"])
 def slack_events():
     """Route for receiving events from the Slack Events API."""
+    # Handle Slack URL verification challenge
+    if request.json and request.json.get("type") == "url_verification":
+        challenge = request.json.get("challenge")
+        if challenge:
+            logging.info("Received Slack URL verification challenge")
+            return challenge, 200, {"Content-Type": "text/plain"}
+    
+    # Handle all other Slack events
     return handler.handle(request)
 
 @flask_app.route("/health", methods=["GET"])
